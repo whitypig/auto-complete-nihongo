@@ -184,7 +184,7 @@ and put words in buffer BUF into this table, and store it in
   (assoc-default buf ac-nihongo--index-cache-alist))
 
 (defun ac-nihongo-split-string (s)
-  "Extract nihongo words by splitting string `s' by
+  "Extract nihongo words by splitting string S by
 `ac-nihongo-separator-regexp'."
   (delete-dups
    (nconc
