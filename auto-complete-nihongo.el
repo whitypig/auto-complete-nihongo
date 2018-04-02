@@ -22,6 +22,29 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;;; Commentary:
+;;
+;; ;; Thanks to http://d.hatena.ne.jp/khiker/20100427
+;; (defun my-popup-isearch-regexp-migemo-function (pattern)
+;;   (concat (regexp-quote pattern)
+;;           ;; migemoize. (require 'migemo) is required!
+;;           (and pattern
+;;                (fboundp 'migemo-get-pattern)
+;;                (concat "\\|"
+;;                        (migemo-get-pattern pattern)))))
+;;
+;; (setq popup-isearch-regexp-builder-function #'my-popup-isearch-regexp-migemo-function)
+;;
+;; (defun my-ac-isearch-around-ad-func (orig-fun &rest args)
+;;   (let ((state (ime-get-mode)))
+;;     ;; Disable IME if need be.
+;;     (and state (toggle-input-method))
+;;     (apply orig-fun args)
+;;     ;; Enable IME if need be.
+;;     (and state (toggle-input-method))))
+;;
+;; (when (fboundp 'ime-get-mode)
+;;   (advice-add 'ac-isearch :around #'my-ac-isearch-around-ad-func))
+;; ;; (advice-remove 'ac-isearch #'my-ac-isearch-around-ad-func)
 
 ;;; Code:
 
