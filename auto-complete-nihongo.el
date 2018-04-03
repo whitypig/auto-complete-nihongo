@@ -105,9 +105,17 @@ does."
 (defun ac-nihongo-get-candidates ()
   "Return a list of candidates that begin with `ac-prefix'."
   (when ac-prefix
-    (cl-loop for buf in (funcall ac-nihongo-select-buffer-function)
-             nconc (ac-nihongo-get-candidates-1 ac-prefix buf) into candidates
-             finally return (delete-dups (sort candidates #'string<)))))
+    (delete-dups
+     (sort (cl-loop for buf in (funcall ac-nihongo-select-buffer-function)
+                    with limit = (or ac-nihongo-limit
+                                     (and (integerp ac-limit)
+                                          ac-limit))
+                    nconc (ac-nihongo-get-candidates-1 ac-prefix buf) into candidates
+                    when (and (integerp limit)
+                              (> (length candidates) ac-nihongo-limit))
+                    return candidates
+                    finally return candidates)
+           #'string<))))
 
 (defun ac-nihongo-get-candidates-in-current-buffer (prefix)
   "Return a list of candidates that begin with PREFIX by
