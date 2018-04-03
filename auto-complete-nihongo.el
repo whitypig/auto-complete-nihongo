@@ -51,6 +51,7 @@
 (require 'cl-lib)
 (require 'auto-complete)
 
+
 ;;; Customization
 
 (defcustom ac-nihongo-separator-regexp "[[:ascii:]、。・「」：？…（）\n\t]"
@@ -99,7 +100,14 @@ below no longer belong to category CATEGORY."
   "Return buffers that have the same major mode as the current bufer
 does."
   (cl-remove-if-not
-   (lambda (buf) (eq major-mode (buffer-local-value 'major-mode buf)))
+   (lambda (buf)
+     (cond
+      ((memq major-mode '(emacs-lisp-mode lisp-interaction-mode))
+       ;; We treat emacs-list-mode and lisp-interaction-mode as the same mode.
+       (memq (buffer-local-value 'major-mode buf)
+             '(emacs-lisp-mode lisp-interaction-mode)))
+      (t
+       (eq major-mode (buffer-local-value 'major-mode buf)))))
    (buffer-list)))
 
 (defun ac-nihongo-get-candidates ()
@@ -153,28 +161,51 @@ searching in current buffer."
   "Return a list of candidates that begin with PREFIX in buffer BUF."
   (cond
    ((eq buf (current-buffer))
+    ;; todo: We should reset hashtable for this buffer? If so, how often?
+    ;; If we frequently switch buffers, this cost would be very high,
+    ;; so we need to come up with some facility...
     (ac-nihongo-get-candidates-in-current-buffer prefix))
    (t
-    (cl-loop for cands in (gethash (substring-no-properties prefix
-                                                            0
-                                                            ac-nihongo--hashtable-key-length)
-                                   (ac-nihongo-get-hashtable buf))
-             when (string-match-p (format "^%s" prefix) cands)
-             collect cands into candidates
+    (cl-loop for cand in (gethash (substring-no-properties prefix
+                                                           0
+                                                           ac-nihongo--hashtable-key-length)
+                                  (ac-nihongo-get-hashtable buf))
+             ;; gethash above returns a sorted list of candidates.
+             ;; So the second time `string-match-p' below returns nil,
+             ;; and this means that there is no more candidates that
+             ;; will match with PREFIX.
+             ;; (aabc abc b bb bba bbb bbc c ca ...)
+             ;;           ^                ^
+             ;;           |                |
+             ;;        found = t       string-match-p returns nil
+             ;; prefix="b"
+             with found = nil
+             with candidates = nil
+             if (string-match-p (format "^%s" prefix) cand)
+             do (progn (or found (setq found t))
+                       (push cand candidates))
+             else if found
+             ;; string-match-p returns nil, but we have already found
+             ;; candidates and we just passed over candidates. No need
+             ;; to search for more.
+             return candidates
              finally return candidates))))
 
-(defun ac-nihongo-get-hashtable (buf)
-  "Return a hashtable that holds nihongo words in buffer BUF.
+(defun ac-nihongo-get-hashtable (buf &optional new)
+  "Return a hashtable that holds words in buffer BUF.
 
-If a hashtable has not been created for buffer BUF, create a new one,
-and put words in buffer BUF into this table, and store it in
-`ac-nihongo--index-cache-alist'."
-  (unless (assoc buf ac-nihongo--index-cache-alist)
+If a hashtable has not been created for buffer BUF, or argument NEW is
+non-nil, create a new one, and put words in buffer BUF into this
+table, and store it in `ac-nihongo--index-cache-alist'."
+  (when (or (null (assoc buf ac-nihongo--index-cache-alist)) new)
     ;; Make a new hashtable for this buffer. Key is a string of length
     ;; ac-nihongo--hashtable-key-length and its value is a list of
-    ;; strings, i.e. "あ" => ("あい" "あお" "あほ" "あんこ"...)
+    ;; strings, sorted.
+    ;; i.e. "あ" => '("あい" "あお" "あほ" "あんこ" ...)
+    ;;      "p"  => '("pop" "prin1" "prin1-to-string" "push" ...)
     (cl-loop with table = (make-hash-table :test #'equal)
              with inserted-words = (make-hash-table :test #'equal)
+             with res-table = (make-hash-table :test #'equal)
              for word in (with-current-buffer buf
                            (ac-nihongo-split-string
                             (buffer-substring-no-properties
@@ -188,7 +219,11 @@ and put words in buffer BUF into this table, and store it in
              else
              do (progn (puthash key (list word) table)
                        (puthash word t inserted-words))
-             finally (push (cons buf table) ac-nihongo--index-cache-alist)))
+             ;; sort each list
+             finally (progn (maphash (lambda (k v)
+                                       (puthash k (sort v #'string<) res-table))
+                                     table)
+                            (push (cons buf res-table) ac-nihongo--index-cache-alist))))
   (assoc-default buf ac-nihongo--index-cache-alist))
 
 (defun ac-nihongo-split-string (s)
@@ -196,6 +231,8 @@ and put words in buffer BUF into this table, and store it in
 `ac-nihongo-separator-regexp'."
   (delete-dups
    (nconc
+    ;; Extract ascii words.
+    (split-string s "[^0-9A-Za-z_-]" t)
     ;; Extract 2-byte hiragana words. Katakana and Kanji are also used
     ;; as separator. Here, we are saying "word", but it actually a
     ;; string consisting of hiragana characters. Same goes for
@@ -215,8 +252,13 @@ of `char-before'."
     ;; Bug: When ch is "～", both hiraganra and katakana will be
     ;; correct. How do we decide which regexp we use?
     (cond
+     ;; ascii-word constituent characters
+     ((string-match-p "[0-9A-Za-z_-]" ch) "[0-9A-Za-z_-]")
+     ;; 2-byte hiragana
      ((string-match-p "\\cH" ch) "\\cH")
+     ;; 2-byte katakana
      ((string-match-p "\\cK" ch) "\\cK")
+     ;; 2-byte kanji
      ((string-match-p "\\cC" ch) "\\cC")
      (t nil))))
 
@@ -235,6 +277,7 @@ of `char-before'."
 (defun ac-nihongo-init ()
   "Debugging purpose."
   (interactive)
+  (setq ac-nihongo--index-cache-alist nil)
   (setq ac-sources '(ac-source-nihongo)))
 
 (ac-define-source nihongo
