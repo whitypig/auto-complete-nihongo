@@ -60,7 +60,7 @@
   :type 'regexp
   :group 'auto-complete-nihongo)
 
-(defcustom ac-nihongo-limit 30
+(defcustom ac-nihongo-limit 20
   "The upper number of candidates to show when completing."
   :type 'number
   :group 'auto-complete-nihongo)
@@ -166,30 +166,33 @@ searching in current buffer."
     ;; so we need to come up with some facility...
     (ac-nihongo-get-candidates-in-current-buffer prefix))
    (t
-    (cl-loop for cand in (gethash (substring-no-properties prefix
-                                                           0
-                                                           ac-nihongo--hashtable-key-length)
-                                  (ac-nihongo-get-hashtable buf))
-             ;; gethash above returns a sorted list of candidates.
-             ;; So the second time `string-match-p' below returns nil,
-             ;; and this means that there is no more candidates that
-             ;; will match with PREFIX.
-             ;; (aabc abc b bb bba bbb bbc c ca ...)
-             ;;           ^                ^
-             ;;           |                |
-             ;;        found = t       string-match-p returns nil
-             ;; prefix="b"
-             with found = nil
-             with candidates = nil
-             if (string-match-p (format "^%s" prefix) cand)
-             do (progn (or found (setq found t))
-                       (push cand candidates))
-             else if found
-             ;; string-match-p returns nil, but we have already found
-             ;; candidates and we just passed over candidates. No need
-             ;; to search for more.
-             return candidates
-             finally return candidates))))
+    (ac-nihongo-get-candidates-in-other-buffer prefix buf))))
+
+(defun ac-nihongo-get-candidates-in-other-buffer (prefix buf)
+  (cl-loop for cand in (gethash (substring-no-properties prefix
+                                                         0
+                                                         ac-nihongo--hashtable-key-length)
+                                (ac-nihongo-get-hashtable buf))
+           ;; gethash above returns a sorted list of candidates.
+           ;; So the second time `string-match-p' below returns nil,
+           ;; and this means that there is no more candidates that
+           ;; will match with PREFIX.
+           ;; (aabc abc b bb bba bbb bbc c ca ...)
+           ;;           ^                ^
+           ;;           |                |
+           ;;        found = t       string-match-p returns nil
+           ;; prefix="b"
+           with found = nil
+           with candidates = nil
+           if (string-match-p (format "^%s" prefix) cand)
+           do (progn (or found (setq found t))
+                     (push cand candidates))
+           else if found
+           ;; string-match-p returns nil, but we have already found
+           ;; candidates and we just passed over candidates. No need
+           ;; to search for more.
+           return candidates
+           finally return candidates))
 
 (defun ac-nihongo-get-hashtable (buf &optional new)
   "Return a hashtable that holds words in buffer BUF.
