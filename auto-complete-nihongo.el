@@ -277,6 +277,13 @@ of `char-before'."
             (point)
           (1+ (point)))))))
 
+(defun ac-nihongo-skk-kakute-maybe ()
+  "When using skk and in `skk-henkan-mode', get `skk-kakutei' be
+called on completion."
+  (when (and (featurep 'skk)
+             skk-henkan-mode)
+    (call-interactively #'skk-kakutei)))
+
 (defun ac-nihongo-init ()
   "Debugging purpose."
   (interactive)
@@ -286,6 +293,7 @@ of `char-before'."
 (ac-define-source nihongo
   '((candidates . ac-nihongo-get-candidates)
     (prefix . ac-nihongo-prefix)
-    (requires . 0)))
+    (requires . 0)
+    (action . ac-nihongo-skk-kakute-maybe)))
 
 (provide 'auto-complete-nihongo)
