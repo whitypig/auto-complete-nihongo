@@ -132,11 +132,12 @@ searching in current buffer."
                    (and (integerp ac-nihongo-limit) ac-nihongo-limit)
                    10))
         (cnt 0)
-        (regexp (format "\\(%s%s+\\)" prefix (ac-nihongo-get-regexp)))
+        (regexp (ac-nihongo--make-regexp prefix))
         (cand nil)
         (table (make-hash-table :test #'equal))
         (pos (point))
         (candidates nil))
+    (cl-assert regexp)
     (save-excursion
       (ignore-errors (goto-char (1- pos)))
       ;; search backward
@@ -156,6 +157,20 @@ searching in current buffer."
           (cl-incf cnt))))
     (maphash (lambda (k v) (push k candidates)) table)
     candidates))
+
+(defun ac-nihongo--make-regexp (prefix)
+  "Make regexp to be used in `ac-nihongo-get-candidates-in-current-buffer'."
+  (cond
+   ((string-match-p "[0-9A-Za-z_-]+" prefix)
+    (format "%s[0-9A-Za-z_-]+" prefix))
+   ((string-match-p "\\cH+" prefix)
+    (format "%s\\cH+" prefix))
+   ((string-match-p "\\cK+" prefix)
+    (format "\\(%s\\cK+\\)\\|\\(%s\\cH+\\)" prefix prefix))
+   ((string-match-p "\\cC+" prefix)
+    (format "\\(%s\\cC+\\)\\|\\(%s\\cH+\\)" prefix prefix))
+   (t
+    nil)))
 
 (defun ac-nihongo-get-candidates-1 (prefix buf)
   "Return a list of candidates that begin with PREFIX in buffer BUF."
@@ -206,47 +221,53 @@ table, and store it in `ac-nihongo--index-cache-alist'."
     ;; strings, sorted.
     ;; i.e. "あ" => '("あい" "あお" "あほ" "あんこ" ...)
     ;;      "p"  => '("pop" "prin1" "prin1-to-string" "push" ...)
-    (cl-loop with table = (make-hash-table :test #'equal)
-             with inserted-words = (make-hash-table :test #'equal)
-             with res-table = (make-hash-table :test #'equal)
-             for word in (with-current-buffer buf
-                           (ac-nihongo-split-string
-                            (buffer-substring-no-properties
-                             (point-min) (point-max))))
-             for key = (substring word 0 1)
-             when (and (> (length word) 1) (not (gethash word inserted-words)))
-             if (gethash key table)
-             do (progn (puthash word t inserted-words)
-                       ;; this word has not been inserted yet
-                       (push word (gethash key table)))
-             else
-             do (progn (puthash key (list word) table)
-                       (puthash word t inserted-words))
-             ;; sort each list
-             finally (progn (maphash (lambda (k v)
-                                       (puthash k (sort v #'string<) res-table))
-                                     table)
-                            (push (cons buf res-table) ac-nihongo--index-cache-alist))))
+    (ac-nihongo--register-hashtable buf))
   (assoc-default buf ac-nihongo--index-cache-alist))
 
-(defun ac-nihongo-split-string (s)
-  "Extract nihongo words by splitting string S by
-`ac-nihongo-separator-regexp'."
-  (delete-dups
-   (nconc
-    ;; Extract ascii words.
-    (split-string s "[^0-9A-Za-z_-]" t)
-    ;; Extract 2-byte hiragana words. Katakana and Kanji are also used
-    ;; as separator. Here, we are saying "word", but it actually a
-    ;; string consisting of hiragana characters. Same goes for
-    ;; katakana words and kanji words.
-    (with-category-table ac-nihongo--hiragana-category-table
-      (split-string s (concat ac-nihongo-separator-regexp "\\|\\cK\\|\\cC") t))
-    ;; Extract 2-byte katakana words
-    (with-category-table ac-nihongo--katakana-category-table
-      (split-string s (concat ac-nihongo-separator-regexp "\\|\\cH\\|\\cC") t))
-    ;; Extract kanji words
-    (split-string s (concat ac-nihongo-separator-regexp "\\|\\cH\\|\\cK") t))))
+(defun ac-nihongo--register-hashtable (buffer)
+  (cl-loop with table = (make-hash-table :test #'equal)
+           with inserted-words = (make-hash-table :test #'equal)
+           with res-table = (make-hash-table :test #'equal)
+           for word in (ac-nihongo--get-word-list buffer)
+           for key = (substring word 0 1)
+           when (and (> (length word) 1) (not (gethash word inserted-words)))
+           if (gethash key table)
+           do (progn (puthash word t inserted-words)
+                     ;; this word has not been inserted yet
+                     (push word (gethash key table)))
+           else
+           do (progn (puthash key (list word) table)
+                     (puthash word t inserted-words))
+           ;; sort each list
+           finally (progn (maphash (lambda (k v)
+                                     (puthash k (sort v #'string<) res-table))
+                                   table)
+                          (push (cons buffer res-table) ac-nihongo--index-cache-alist))))
+
+(defun ac-nihongo--get-word-list (buffer)
+  (cl-loop with lst = (ac-nihongo-split-buffer-string buffer)
+           with ret = nil
+           for curr in lst
+           for next in (cdr lst)
+           do (progn (push curr ret)
+                     (when (and next
+                                (string-match-p "\\cC+\\|\\cK+" curr)
+                                (string-match-p "\\cH+" next))
+                       ;; Also collect "kanji + hiragana" and
+                       ;; "Katakana + hiragana"
+                       (push (concat curr next) ret)))
+           finally return (nreverse ret)))
+
+(defun ac-nihongo-split-buffer-string (buffer)
+  "Return a list of hiragana words, katakana words and kanji words in
+current buffer."
+  (let ((ret nil)
+        (regexp "\\cH+\\|\\cK+\\|\\cC+\\|[0-9A-Za-z_-]+"))
+    (with-current-buffer buffer
+      (save-excursion (goto-char (point-min))
+                      (while (re-search-forward regexp nil t)
+                        (push (match-string-no-properties 0) ret))))
+    (nreverse ret)))
 
 (defun ac-nihongo-get-regexp ()
   "Return regexp to be used to determine prefix depending on the type
