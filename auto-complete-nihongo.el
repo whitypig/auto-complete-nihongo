@@ -238,13 +238,15 @@ table, and store it in `ac-nihongo--index-cache-alist'."
            else
            do (progn (puthash key (list word) table)
                      (puthash word t inserted-words))
-           ;; sort each list
            finally (progn (maphash (lambda (k v)
+                                     ;; sort each list
                                      (puthash k (sort v #'string<) res-table))
                                    table)
                           (push (cons buffer res-table) ac-nihongo--index-cache-alist))))
 
 (defun ac-nihongo--get-word-list (buffer)
+  "Split buffer string by the type of character and return a list of
+would-be candidates."
   (cl-loop with lst = (ac-nihongo-split-buffer-string buffer)
            with ret = nil
            for curr in lst
@@ -256,6 +258,7 @@ table, and store it in `ac-nihongo--index-cache-alist'."
                        ;; Also collect "kanji + hiragana" and
                        ;; "Katakana + hiragana"
                        (push (concat curr next) ret)))
+           ;; todo: Who do we need to reverse ret?
            finally return (nreverse ret)))
 
 (defun ac-nihongo-split-buffer-string (buffer)
@@ -272,19 +275,38 @@ current buffer."
 (defun ac-nihongo-get-regexp ()
   "Return regexp to be used to determine prefix depending on the type
 of `char-before'."
-  (let ((ch (char-to-string (char-before))))
-    ;; Bug: When ch is "～", both hiraganra and katakana will be
-    ;; correct. How do we decide which regexp we use?
+  (let* ((ch (char-to-string (char-before)))
+         (anomaly-characters "ー〜")
+         (anomaly-regexp (format "[%s]" anomaly-characters)))
     (cond
      ;; ascii-word constituent characters
      ((string-match-p "[0-9A-Za-z_-]" ch) "[0-9A-Za-z_-]")
-     ;; 2-byte hiragana
-     ((string-match-p "\\cH" ch) "\\cH")
-     ;; 2-byte katakana
-     ((string-match-p "\\cK" ch) "\\cK")
-     ;; 2-byte kanji
-     ((string-match-p "\\cC" ch) "\\cC")
-     (t nil))))
+     ((string-match-p anomaly-regexp ch)
+      ;; Special case:
+      ;; When ch is "～" or "ー", both hiraganra and katakana will be
+      ;; correct as regexp, so we will look back for another
+      ;; character.
+      (cond
+       ((save-excursion
+          (and (re-search-backward (format "[^%s]" anomaly-characters) nil t)
+               (setq ch (char-to-string (char-after)))))
+        ;; We found a character other than "ー" or "〜".
+        (ac-nihongo-get-regexp-1 ch))
+       (t
+        ;; Return hiragana as a fallback case.
+        "\\cH")))
+     (t
+      (ac-nihongo-get-regexp-1 ch)))))
+
+(defun ac-nihongo-get-regexp-1 (ch)
+  (cond
+   ;; 2-byte hiragana
+   ((string-match-p "\\cH" ch) "\\cH")
+   ;; 2-byte katakana
+   ((string-match-p "\\cK" ch) "\\cK")
+   ;; 2-byte kanji
+   ((string-match-p "\\cC" ch) "\\cC")
+   (t nil)))
 
 (defun ac-nihongo-prefix ()
   (let ((regexp (ac-nihongo-get-regexp)))
