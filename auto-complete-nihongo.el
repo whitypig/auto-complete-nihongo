@@ -162,13 +162,17 @@ searching in current buffer."
   "Make regexp to be used in `ac-nihongo-get-candidates-in-current-buffer'."
   (cond
    ((string-match-p "[0-9A-Za-z_-]+" prefix)
-    (format "%s[0-9A-Za-z_-]+" prefix))
+    ;; "ascii" or "ascii + katakana"
+    (format "\\(%s[0-9A-Za-z_-]+\\)\\|\\(%s[0-9A-Za-z_-]*\\cK+\\)" prefix prefix))
    ((string-match-p "\\cH+" prefix)
-    (format "%s\\cH+" prefix))
+    ;; "hiragana" or "hiragan + kanji"
+    (format "\\(%s\\cH+\\)\\|\\(%s\\cH*\\cC+\\)" prefix prefix))
    ((string-match-p "\\cK+" prefix)
-    (format "\\(%s\\cK+\\)\\|\\(%s\\cH+\\)" prefix prefix))
+    ;; "katakana" or "katakana + hiragana"
+    (format "\\(%s\\cK+\\)\\|\\(%s\\cK*\\cH+\\)" prefix prefix))
    ((string-match-p "\\cC+" prefix)
-    (format "\\(%s\\cC+\\)\\|\\(%s\\cH+\\)" prefix prefix))
+    ;; "kanji" or "kanji + hiragana"
+    (format "\\(%s\\cC+\\)\\|\\(%s\\cC*\\cH+\\)" prefix prefix))
    (t
     nil)))
 
@@ -252,14 +256,28 @@ would-be candidates."
            for curr in lst
            for next in (cdr lst)
            do (progn (push curr ret)
-                     (when (and next
-                                (string-match-p "\\cC+\\|\\cK+" curr)
-                                (string-match-p "\\cH+" next))
-                       ;; Also collect "kanji + hiragana" and
-                       ;; "Katakana + hiragana"
+                     (when (ac-nihongo--is-target-word curr next)
                        (push (concat curr next) ret)))
-           ;; todo: Who do we need to reverse ret?
-           finally return (nreverse ret)))
+           finally return ret))
+
+(defun ac-nihongo--is-target-word (curr next)
+  (or (and next
+           ;; "kanji + hiragana" and
+           ;; "katakana + hiragana"
+           (string-match-p "\\cC+\\|\\cK+" curr)
+           (string-match-p "\\cH+" next))
+      (and next
+           ;; "alphabet" + "katakana"
+           (string-match-p "[0-9A-Za-z_-]+" curr)
+           (string-match-p "\\cK+" next))
+      (and next
+           ;; "katakana" + "hiragana"
+           (string-match-p "\\cK+" curr)
+           (string-match-p "\\cH+" next))
+      (and next
+           ;; "hiragana" + "kanji"
+           (string-match-p "\\cH+" curr)
+           (string-match-p "\\cK+" next))))
 
 (defun ac-nihongo-split-buffer-string (buffer)
   "Return a list of hiragana words, katakana words and kanji words in
@@ -332,6 +350,12 @@ called on completion."
   (interactive)
   (setq ac-nihongo--index-cache-alist nil)
   (setq ac-sources '(ac-source-nihongo)))
+
+(defun ac-nihongo-toggle-source ()
+  (interactive)
+  (if (memq 'ac-source-nihongo ac-sources)
+      (setq ac-sources (delq 'ac-source-nihongo ac-sources))
+    (push 'ac-source-nihongo ac-sources)))
 
 (ac-define-source nihongo
   '((candidates . ac-nihongo-get-candidates)
