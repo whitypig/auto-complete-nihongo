@@ -65,12 +65,18 @@
   :type 'number
   :group 'auto-complete-nihongo)
 
-(defcustom ac-nihongo-select-buffer-function #'ac-nihongo-select-exact-same-mode-buffers
+(defcustom ac-nihongo-select-buffer-function #'ac-nihongo-select-target-mode-buffers
   "A function that returns a list of buffers. Those buffers are
   searched for candidates."
   :type 'symbol
   :group 'auto-complete-nihongo)
 
+(defcustom ac-nihongo-mode-group-list
+  '((emacs-lisp-mode lisp-interaction-mode)
+    (python-mode inferior-python-mode))
+  ""
+  :type 'list
+  :group 'auto-complete-nihongo)
 
 ;;; Variables
 
@@ -96,19 +102,18 @@ below no longer belong to category CATEGORY."
 (defvar ac-nihongo--katakana-category-table (ac-nihongo--make-category-table ?H)
   "Category table used to extract 2-byte katakana words.")
 
-(defun ac-nihongo-select-exact-same-mode-buffers ()
+(defun ac-nihongo-select-target-mode-buffers ()
   "Return buffers that have the same major mode as the current bufer
 does."
-  (cl-remove-if-not
-   (lambda (buf)
-     (cond
-      ((memq major-mode '(emacs-lisp-mode lisp-interaction-mode))
-       ;; We treat emacs-list-mode and lisp-interaction-mode as the same mode.
-       (memq (buffer-local-value 'major-mode buf)
-             '(emacs-lisp-mode lisp-interaction-mode)))
-      (t
-       (eq major-mode (buffer-local-value 'major-mode buf)))))
-   (buffer-list)))
+  (let ((target-major-modes (or (cl-find-if
+                                 (lambda (elt)
+                                   (memq major-mode elt))
+                                 ac-nihongo-mode-group-list)
+                                (list major-mode))))
+    (cl-remove-if-not (lambda (buf)
+                        (memq (buffer-local-value 'major-mode buf)
+                              target-major-modes))
+                      (buffer-list))))
 
 (defun ac-nihongo-get-candidates ()
   "Return a list of candidates that begin with `ac-prefix'."
@@ -128,51 +133,67 @@ does."
 (defun ac-nihongo-get-candidates-in-current-buffer (prefix)
   "Return a list of candidates that begin with PREFIX by
 searching in current buffer."
-  (let ((limit (or (and (integerp ac-limit) ac-limit)
-                   (and (integerp ac-nihongo-limit) ac-nihongo-limit)
-                   10))
-        (cnt 0)
-        (regexp (ac-nihongo--make-regexp prefix))
-        (cand nil)
-        (table (make-hash-table :test #'equal))
-        (pos (point))
-        (candidates nil))
-    (cl-assert regexp)
+  (let* ((limit (or (and (integerp ac-limit) ac-limit)
+                    (and (integerp ac-nihongo-limit) ac-nihongo-limit)
+                    10))
+         (cnt 0)
+         (cell (ac-nihongo--make-regexp prefix))
+         (prefix-regexp (and (consp cell) (car cell)))
+         (cand-regexp (and (consp cell) (cdr cell)))
+         (cand nil)
+         (table (make-hash-table :test #'equal))
+         (pos (point))
+         (candidates nil)
+         (prefix-len (length prefix)))
+    (cl-assert (and prefix-regexp cand-regexp))
     (save-excursion
       (ignore-errors (goto-char (1- pos)))
       ;; search backward
-      (while (and (< cnt limit)
-                  (re-search-backward regexp nil t))
+      (while (and (< (hash-table-count table) limit)
+                  (re-search-backward cand-regexp nil t))
         (setq cand (match-string-no-properties 0))
-        (unless (gethash cand table)
+        (when (< prefix-len (length cand))
           (puthash cand t table)
-          (cl-incf cnt)))
+          (when (string-match (format "^\\(%s\\).*" prefix-regexp) cand)
+            ;; cand contains characters other than
+            ;; prefix-regexp-matching ones.  extract
+            ;; prefix-regexp-matching string part and put it into hash
+            ;; table.
+            (puthash (match-string-no-properties 1 cand) t table))))
       (ignore-errors (goto-char (1+ pos)))
       ;; then search forward
-      (while (and (< cnt limit)
-                  (re-search-forward regexp nil t))
+      (while (and (< (hash-table-count table) limit)
+                  (re-search-forward cand-regexp nil t))
         (setq cand (match-string-no-properties 0))
-        (unless (gethash cand table)
+        (when (< prefix-len (length cand))
           (puthash cand t table)
-          (cl-incf cnt))))
+          (when (string-match (format "^\\(%s\\).*" prefix-regexp) cand)
+            ;; cand contains characters other than
+            ;; prefix-regexp-matching ones.  extract
+            ;; prefix-regexp-matching string part and put it into hash
+            ;; table.
+            (puthash (match-string-no-properties 1 cand) t table)))))
     (maphash (lambda (k v) (push k candidates)) table)
     candidates))
 
 (defun ac-nihongo--make-regexp (prefix)
-  "Make regexp to be used in `ac-nihongo-get-candidates-in-current-buffer'."
+  "Make regexp to be used in
+`ac-nihongo-get-candidates-in-current-buffer' and returns a cons cell,
+whose car is a regexp that represents prefix, and cdr is also a regexp
+used to search for candidates."
   (cond
-   ((string-match-p "[0-9A-Za-z_-]+" prefix)
+   ((string-match-p "^[0-9A-Za-z_-]+$" prefix)
     ;; "ascii" or "ascii + katakana"
-    (format "\\(%s[0-9A-Za-z_-]+\\)\\|\\(%s[0-9A-Za-z_-]*\\cK+\\)" prefix prefix))
-   ((string-match-p "\\cH+" prefix)
+    (cons "[0-9A-Za-z_-]+" (format "%s[0-9A-Za-z_-]*\\cK*" prefix)))
+   ((string-match-p "^\\cH+$" prefix)
     ;; "hiragana" or "hiragan + kanji"
-    (format "\\(%s\\cH+\\)\\|\\(%s\\cH*\\cC+\\)" prefix prefix))
-   ((string-match-p "\\cK+" prefix)
+    (cons "\\cH+" (format "%s\\cH*\\cC*" prefix)))
+   ((string-match-p "^\\cK+$" prefix)
     ;; "katakana" or "katakana + hiragana"
-    (format "\\(%s\\cK+\\)\\|\\(%s\\cK*\\cH+\\)" prefix prefix))
-   ((string-match-p "\\cC+" prefix)
+    (cons "\\cK+" (format "%s\\cK*\\cH*" prefix)))
+   ((string-match-p "^\\cC+$" prefix)
     ;; "kanji" or "kanji + hiragana"
-    (format "\\(%s\\cC+\\)\\|\\(%s\\cC*\\cH+\\)" prefix prefix))
+    (cons "\\cC+" (format "%s\\cC*\\cH+" prefix)))
    (t
     nil)))
 
