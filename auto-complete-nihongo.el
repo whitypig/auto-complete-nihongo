@@ -154,9 +154,9 @@ searching in current buffer."
         (setq cand (match-string-no-properties 0))
         (when (< prefix-len (length cand))
           (puthash cand t table)
-          (when (string-match (format "^\\(%s\\).*" prefix-regexp) cand)
-            ;; cand contains characters other than
-            ;; prefix-regexp-matching ones.  extract
+          (when (string-match (format "\\(%s\\).*" prefix-regexp) cand)
+            ;; cand contains different characters other than
+            ;; prefix-regexp-matching ones. extract
             ;; prefix-regexp-matching string part and put it into hash
             ;; table.
             (puthash (match-string-no-properties 1 cand) t table))))
@@ -224,7 +224,7 @@ used to search for candidates."
            ;; prefix="b"
            with found = nil
            with candidates = nil
-           if (string-match-p (format "^%s" prefix) cand)
+           if (string-match-p (format "^%s.*" prefix) cand)
            do (progn (or found (setq found t))
                      (push cand candidates))
            else if found
