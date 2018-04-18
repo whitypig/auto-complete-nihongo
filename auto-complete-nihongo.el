@@ -164,7 +164,11 @@ searching in current buffer."
             ;; prefix-regexp-matching ones. extract
             ;; prefix-regexp-matching string part and put it into hash
             ;; table.
-            (puthash (match-string-no-properties 1 cand) t table))))
+            (puthash (match-string-no-properties 1 cand) t table))
+          (when (and (string-match-p ac-nihongo-ascii-regexp cand)
+                     (setq lst (split-string cand "[_-]" t)))
+            ;; If cand is "abc-def", we make "def" a candidate as well.
+            (mapc (lambda (elt) (puthash elt t table)) lst))))
       (ignore-errors (goto-char (1+ pos)))
       ;; then search forward
       (while (and (< (hash-table-count table) limit)
@@ -177,7 +181,10 @@ searching in current buffer."
             ;; prefix-regexp-matching ones. extract
             ;; prefix-regexp-matching string part and put it into hash
             ;; table.
-            (puthash (match-string-no-properties 1 cand) t table)))))
+            (puthash (match-string-no-properties 1 cand) t table))
+          (when (and (string-match-p ac-nihongo-ascii-regexp cand)
+                     (setq lst (split-string cand "[_-]" t)))
+            (mapc (lambda (elt) (puthash elt t table)) lst)))))
     (maphash (lambda (k v) (push k candidates)) table)
     candidates))
 
@@ -207,9 +214,9 @@ used to search for candidates."
   "Return a list of candidates that begin with PREFIX in buffer BUF."
   (cond
    ((eq buf (current-buffer))
-    ;; todo: We should reset hashtable for this buffer? If so, how often?
-    ;; If we frequently switch buffers, this cost would be very high,
-    ;; so we need to come up with some facility...
+    ;; Reset hashtable for current buffer.
+    (and (assoc buf ac-nihongo--index-cache-alist)
+         (assq-delete-all buf ac-nihongo--index-cache-alist))
     (ac-nihongo-get-candidates-in-current-buffer prefix))
    (t
     (ac-nihongo-get-candidates-in-other-buffer prefix buf))))
@@ -310,11 +317,18 @@ would-be candidates."
   "Return a list of hiragana words, katakana words and kanji words in
 current buffer."
   (let ((ret nil)
-        (regexp (format "\\cH+\\|\\cK+\\|\\cC+\\|%s+" ac-nihongo-ascii-regexp)))
+        (regexp (format "\\cH+\\|\\cK+\\|\\cC+\\|%s+" ac-nihongo-ascii-regexp))
+        (word nil))
     (with-current-buffer buffer
       (save-excursion (goto-char (point-min))
                       (while (re-search-forward regexp nil t)
-                        (push (match-string-no-properties 0) ret))))
+                        (setq word (match-string-no-properties 0))
+                        (push word ret)
+                        (when (string-match-p ac-nihongo-ascii-regexp word)
+                          ;; If word is like "abc-def", then we push
+                          ;; abc and def into ret as well.
+                          (mapc (lambda (elt) (push elt ret))
+                                (split-string word "[_-]" t))))))
     (nreverse ret)))
 
 (defun ac-nihongo-get-regexp ()
