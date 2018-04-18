@@ -78,6 +78,11 @@
   :type 'list
   :group 'auto-complete-nihongo)
 
+(defcustom ac-nihongo-ascii-regexp "[0-9A-Za-z_-]"
+  "Regexp used to search for candidates that are not multibyte strings."
+  :type 'regexp
+  :group 'auto-complete-nihongo)
+
 ;;; Variables
 
 (defvar ac-nihongo--index-cache-alist nil
@@ -169,7 +174,7 @@ searching in current buffer."
           (puthash cand t table)
           (when (string-match (format "^\\(%s\\).*" prefix-regexp) cand)
             ;; cand contains characters other than
-            ;; prefix-regexp-matching ones.  extract
+            ;; prefix-regexp-matching ones. extract
             ;; prefix-regexp-matching string part and put it into hash
             ;; table.
             (puthash (match-string-no-properties 1 cand) t table)))))
@@ -182,9 +187,10 @@ searching in current buffer."
 whose car is a regexp that represents prefix, and cdr is also a regexp
 used to search for candidates."
   (cond
-   ((string-match-p "^[0-9A-Za-z_-]+$" prefix)
+   ((string-match-p (format "^%s+$" ac-nihongo-ascii-regexp) prefix)
     ;; "ascii" or "ascii + katakana"
-    (cons "[0-9A-Za-z_-]+" (format "%s[0-9A-Za-z_-]*\\cK*" prefix)))
+    (cons (format "%s+" ac-nihongo-ascii-regexp)
+          (format "%s%s*\\cK*" prefix ac-nihongo-ascii-regexp)))
    ((string-match-p "^\\cH+$" prefix)
     ;; "hiragana" or "hiragan + kanji"
     (cons "\\cH+" (format "%s\\cH*\\cC*" prefix)))
@@ -289,7 +295,7 @@ would-be candidates."
            (string-match-p "\\cH+" next))
       (and next
            ;; "alphabet" + "katakana"
-           (string-match-p "[0-9A-Za-z_-]+" curr)
+           (string-match-p (format "%s+" ac-nihongo-ascii-regexp) curr)
            (string-match-p "\\cK+" next))
       (and next
            ;; "katakana" + "hiragana"
@@ -304,7 +310,7 @@ would-be candidates."
   "Return a list of hiragana words, katakana words and kanji words in
 current buffer."
   (let ((ret nil)
-        (regexp "\\cH+\\|\\cK+\\|\\cC+\\|[0-9A-Za-z_-]+"))
+        (regexp (format "\\cH+\\|\\cK+\\|\\cC+\\|%s+" ac-nihongo-ascii-regexp)))
     (with-current-buffer buffer
       (save-excursion (goto-char (point-min))
                       (while (re-search-forward regexp nil t)
@@ -319,7 +325,8 @@ of `char-before'."
          (anomaly-regexp (format "[%s]" anomaly-characters)))
     (cond
      ;; ascii-word constituent characters
-     ((string-match-p "[0-9A-Za-z_-]" ch) "[0-9A-Za-z_-]")
+     ((string-match-p (format "%s" ac-nihongo-ascii-regexp) ch)
+      ac-nihongo-ascii-regexp)
      ((string-match-p anomaly-regexp ch)
       ;; Special case:
       ;; When ch is "～" or "ー", both hiraganra and katakana will be
