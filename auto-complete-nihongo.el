@@ -107,9 +107,21 @@ below no longer belong to category CATEGORY."
 (defvar ac-nihongo--katakana-category-table (ac-nihongo--make-category-table ?H)
   "Category table used to extract 2-byte katakana words.")
 
+(defvar ac-nihongo--not-found-prefix nil
+  "Prefix string used in the last search, which failed to find any
+candidate in current buffer. `nil' means that the last search found
+something.")
+
+(defvar ac-nihongo--not-found-regexp nil
+  "Regexp used in the last search which failed ot find candidates.")
+
+(defvar ac-nihongo--not-found-buffer nil
+  "The buffer in which the last search was performed and it failed to
+find candidates.")
+
 (defun ac-nihongo-select-target-mode-buffers ()
-  "Return buffers that have the same major mode as the current bufer
-does."
+  "Return buffers that have the same major mode as that of current
+buffer."
   (let ((target-major-modes (or (cl-find-if
                                  (lambda (elt)
                                    (memq major-mode elt))
@@ -136,8 +148,8 @@ does."
            #'string<))))
 
 (defun ac-nihongo-get-candidates-in-current-buffer (prefix)
-  "Return a list of candidates that begin with PREFIX by
-searching in current buffer."
+  "Return a list of candidates in current buffer that begin with
+PREFIX."
   (let* ((limit (or (and (integerp ac-limit) ac-limit)
                     (and (integerp ac-nihongo-limit) ac-nihongo-limit)
                     10))
@@ -149,44 +161,87 @@ searching in current buffer."
          (table (make-hash-table :test #'equal))
          (pos (point))
          (candidates nil)
+         (tail-candidates nil)
          (prefix-len (length prefix)))
     (cl-assert (and prefix-regexp cand-regexp))
-    (save-excursion
-      (ignore-errors (goto-char (1- pos)))
-      ;; search backward
-      (while (and (< (hash-table-count table) limit)
-                  (re-search-backward cand-regexp nil t))
-        (setq cand (match-string-no-properties 0))
-        (when (< prefix-len (length cand))
-          (puthash cand t table)
-          (when (string-match (format "\\(%s\\).*" prefix-regexp) cand)
-            ;; cand contains different characters other than
-            ;; prefix-regexp-matching ones. extract
-            ;; prefix-regexp-matching string part and put it into hash
-            ;; table.
-            (puthash (match-string-no-properties 1 cand) t table))
-          (when (and (string-match-p ac-nihongo-ascii-regexp cand)
-                     (setq lst (split-string cand "[_-]" t)))
-            ;; If cand is "abc-def", we make "def" a candidate as well.
-            (mapc (lambda (elt) (puthash elt t table)) lst))))
-      (ignore-errors (goto-char (1+ pos)))
-      ;; then search forward
-      (while (and (< (hash-table-count table) limit)
-                  (re-search-forward cand-regexp nil t))
-        (setq cand (match-string-no-properties 0))
-        (when (< prefix-len (length cand))
-          (puthash cand t table)
-          (when (string-match (format "^\\(%s\\).*" prefix-regexp) cand)
-            ;; cand contains characters other than
-            ;; prefix-regexp-matching ones. extract
-            ;; prefix-regexp-matching string part and put it into hash
-            ;; table.
-            (puthash (match-string-no-properties 1 cand) t table))
-          (when (and (string-match-p ac-nihongo-ascii-regexp cand)
-                     (setq lst (split-string cand "[_-]" t)))
-            (mapc (lambda (elt) (puthash elt t table)) lst)))))
-    (maphash (lambda (k v) (push k candidates)) table)
-    candidates))
+    (when (ac-nihongo--go-search-p prefix prefix-regexp (current-buffer))
+      ;; Note: Would it better to use hashtable for collecting candidates
+      ;; in current buffer?
+      (message "DEBUG: in-current-buffer, prefix=%s, ac-nihongo--not-found-prefix=%s" prefix ac-nihongo--not-found-prefix)
+      (ac-nihongo-search-candidates-in-buffer cand-regexp
+                                              prefix-len
+                                              (1- pos)
+                                              limit
+                                              table
+                                              #'re-search-backward)
+      (ac-nihongo-search-candidates-in-buffer cand-regexp
+                                              prefix-len
+                                              (1+ pos)
+                                              limit
+                                              table
+                                              #'re-search-forward)
+      ;; Collect candidates in table
+      (maphash (lambda (cand v)
+                 (push cand candidates)
+                 (when (string-match (format "\\(%s\\).*" prefix-regexp) cand)
+                   ;; cand contains different characters other than
+                   ;; prefix-regexp-matching ones. Extract
+                   ;; prefix-regexp-matching string part and put it
+                   ;; into hash table.
+                   ;; If prefix is "Vi" and cand is "Vimプロフェッショナル",
+                   ;; for example, then we also want to collect "Vim"
+                   ;; as a candidate.
+                   (push (match-string-no-properties 1 cand) tail-candidates))
+                 (when (and (string-match-p ac-nihongo-ascii-regexp cand)
+                            (setq lst (split-string cand "[_-]" t)))
+                   ;; If cand is "abc-def", we make "def" a candidate as well.
+                   (mapc (lambda (elt) (push elt tail-candidates)) lst)))
+               table)
+      (if candidates
+          ;; Found candidates and we clear not-found-state.
+          (ac-nihongo--clear-not-found-state)
+        ;; Found nothing and we set not-found-state
+        (ac-nihongo--set-not-found-state prefix prefix-regexp (current-buffer)))
+      (append candidates tail-candidates))))
+
+(defun ac-nihongo-search-candidates-in-buffer (regexp min-len pos limit table search-func)
+  (let ((cand nil))
+    (save-excursion (ignore-errors (goto-char pos)))
+    (while (and (< (hash-table-count table) limit)
+                (funcall search-func regexp nil t))
+      (setq cand (match-string-no-properties 0))
+      (when (< min-len (length cand))
+        (puthash cand t table)))))
+
+(defun ac-nihongo--go-search-p (prefix prefix-regexp buffer)
+  (cond
+   ((or (null ac-nihongo--not-found-buffer)
+        (not (eq ac-nihongo--not-found-buffer buffer)))
+    ;; Must have switched to another buffer and we have to search in BUFFER.
+    t)
+   ((and (null ac-nihongo--not-found-prefix)
+         (null ac-nihongo--not-found-regexp))
+    t)
+   ((and (stringp ac-nihongo--not-found-prefix)
+         (eq ac-nihongo--not-found-buffer buffer))
+    ;; The last search was done in buffer
+    ;; `ac-nihongo--not-found-buffer' with prefix being
+    ;; `ac-nihongo--not-found-buffer' and no candidates are found.
+    ;; Therefore, if `ac-nihongo--not-found-prefix' is still a prefix
+    ;; of PREFIX, we don't need to do search.
+    (not (string-match-p (concat "^" ac-nihongo--not-found-prefix) prefix)))
+   (t
+    t)))
+
+(defun ac-nihongo--clear-not-found-state ()
+  (setq ac-nihongo--not-found-buffer nil)
+  (setq ac-nihongo--not-found-prefix nil)
+  (setq ac-nihongo--not-found-regexp nil))
+
+(defun ac-nihongo--set-not-found-state (prefix prefix-regexp buffer)
+  (setq ac-nihongo--not-found-buffer buffer)
+  (setq ac-nihongo--not-found-prefix prefix)
+  (setq ac-nihongo--not-found-regexp prefix-regexp))
 
 (defun ac-nihongo--make-regexp (prefix)
   "Make regexp to be used in
@@ -370,6 +425,9 @@ of `char-before'."
 
 (defun ac-nihongo-prefix ()
   (let ((regexp (ac-nihongo-get-regexp)))
+    (unless regexp
+      ;; Clear the last search state.
+      (ac-nihongo--clear-not-found-state))
     (when regexp
       (save-excursion
         (backward-char)
