@@ -45,6 +45,10 @@
 ;; (when (fboundp 'ime-get-mode)
 ;;   (advice-add 'ac-isearch :around #'my-ac-isearch-around-ad-func))
 ;; ;; (advice-remove 'ac-isearch #'my-ac-isearch-around-ad-func)
+;;
+;; (when (featurep 'skk)
+;;   (add-to-list 'ac-trigger-commands 'skk-insert)
+;;   (add-to-list 'ac-trigger-commands 'skk-kakutei))
 
 ;;; Code:
 
@@ -167,7 +171,7 @@ PREFIX."
     (when (ac-nihongo--go-search-p prefix prefix-regexp (current-buffer))
       ;; Note: Would it better to use hashtable for collecting candidates
       ;; in current buffer?
-      (message "DEBUG: in-current-buffer, prefix=%s, ac-nihongo--not-found-prefix=%s" prefix ac-nihongo--not-found-prefix)
+      ;; (message "DEBUG: in-current-buffer, prefix=%s, ac-nihongo--not-found-prefix=%s" prefix ac-nihongo--not-found-prefix)
       (ac-nihongo-search-candidates-in-buffer cand-regexp
                                               prefix-len
                                               (1- pos)
@@ -449,6 +453,9 @@ called on completion."
   "Debugging purpose."
   (interactive)
   (setq ac-nihongo--index-cache-alist nil)
+  (setq ac-nihongo--not-found-prefix nil
+        ac-nihongo--not-found-regexp nil
+        ac-nihongo--not-found-buffer nil)
   (setq ac-sources '(ac-source-nihongo)))
 
 (defun ac-nihongo-toggle-source ()
