@@ -5,7 +5,7 @@
 ;; Author: whitypig <whitypig@gmail.com>
 ;; URL:
 ;; Version: 0.01
-;; Package-Requires: ((auto-complete) (cl))
+;; Package-Requires: ((auto-complete) (cl-lib))
 ;; Keywords: auto-comlete
 
 ;; This program is free software; you can redistribute it and/or modify
@@ -265,7 +265,7 @@ used to search for candidates."
     (cons "\\cK+" (format "%s\\cK*\\cH*" prefix)))
    ((string-match-p "^\\cC+$" prefix)
     ;; "kanji" or "kanji + hiragana"
-    (cons "\\cC+" (format "%s\\cC*\\cH+" prefix)))
+    (cons "\\cC+" (format "%s\\cC*\\cH*" prefix)))
    (t
     nil)))
 
@@ -471,3 +471,10 @@ called on completion."
     (action . ac-nihongo-skk-kakute-maybe)))
 
 (provide 'auto-complete-nihongo)
+
+;; Local Variables:
+;; coding: utf-8
+;; indent-tabs-mode: nil
+;; End:
+
+;; auto-complete-nihongo.el ends here.
