@@ -210,12 +210,13 @@ PREFIX."
 
 (defun ac-nihongo-search-candidates-in-buffer (regexp min-len pos limit table search-func)
   (let ((cand nil))
-    (save-excursion (ignore-errors (goto-char pos)))
-    (while (and (< (hash-table-count table) limit)
-                (funcall search-func regexp nil t))
-      (setq cand (match-string-no-properties 0))
-      (when (< min-len (length cand))
-        (puthash cand t table)))))
+    (save-excursion
+      (ignore-errors (goto-char pos))
+      (while (and (< (hash-table-count table) limit)
+                  (funcall search-func regexp nil t))
+        (setq cand (match-string-no-properties 0))
+        (when (< min-len (length cand))
+          (puthash cand t table))))))
 
 (defun ac-nihongo--go-search-p (prefix prefix-regexp buffer)
   (cond
@@ -254,9 +255,15 @@ whose car is a regexp that represents prefix, and cdr is also a regexp
 used to search for candidates."
   (cond
    ((string-match-p (format "^%s+$" ac-nihongo-ascii-regexp) prefix)
-    ;; "ascii" or "ascii + katakana"
+    ;; "ascii" or "ascii + katakana" or "ascii + kanji".
+    ;; "or" in regexp seems to be performed from left to right, so if
+    ;; "ascii + katakana" fails to match, then try with "ascii +
+    ;; kanji", and if it also fails, try with "ascii".
     (cons (format "%s+" ac-nihongo-ascii-regexp)
-          (format "%s%s*\\cK*" prefix ac-nihongo-ascii-regexp)))
+          (format "%s%s*\\cK+\\|%s%s*\\cC+\\|%s%s*"
+                  prefix ac-nihongo-ascii-regexp
+                  prefix ac-nihongo-ascii-regexp
+                  prefix ac-nihongo-ascii-regexp)))
    ((string-match-p "^\\cH+$" prefix)
     ;; "hiragana" or "hiragan + kanji"
     (cons "\\cH+" (format "%s\\cH*\\cC*" prefix)))
@@ -363,6 +370,10 @@ would-be candidates."
            ;; "alphabet" + "katakana"
            (string-match-p (format "%s+" ac-nihongo-ascii-regexp) curr)
            (string-match-p "\\cK+" next))
+      (and next
+           ;; "alphabet" + "kanji"
+           (string-match-p (format "%s+" ac-nihongo-ascii-regexp) curr)
+           (string-match-p "\\cC+" next))
       (and next
            ;; "katakana" + "hiragana"
            (string-match-p "\\cK+" curr)
